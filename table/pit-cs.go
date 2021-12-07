@@ -25,6 +25,8 @@ type PitCs struct {
 	nPitEntries int // Number of PIT entries in tree
 	pitTokenMap map[uint32]*PitEntry
 
+	pitCsNodeMap map[string][]*PitCsNode // Hash of name component to list of PitCsNodes
+
 	nCsEntries    int // Number of CS entries in tree
 	csReplacement CsReplacementPolicy
 	csMap         map[uint64]*CsEntry
@@ -96,6 +98,7 @@ func NewPitCS() *PitCs {
 	pitCs.root.pitEntries = make([]*PitEntry, 0)
 	pitCs.ExpiringPitEntries = make(chan *PitEntry, tableQueueSize)
 	pitCs.pitTokenMap = make(map[uint32]*PitEntry)
+	pitCs.pitCsNodeMap = make(map[string][]*PitCsNode)
 
 	// This value has already been validated from loading the configuration, so we know it will be one of the following (or else fatal)
 	switch csReplacementPolicy {
@@ -109,37 +112,60 @@ func NewPitCS() *PitCs {
 	return pitCs
 }
 
-func (p *PitCsNode) findExactMatchEntry(name *ndn.Name) *PitCsNode {
-	if name.Size() > p.depth {
-		for _, child := range p.children {
-			if name.At(child.depth - 1).Equals(child.component) {
-				return child.findExactMatchEntry(name)
+// Given `name`, see if there is a match in PitCs for components in range [0, depth]
+// components. Must be an exact match for all `depth` components.
+// Returns `nil` if no match found.
+func (p *PitCs) findEntryAtDepth(name *ndn.Name, depth int) *PitCsNode {
+	if nodeArr, present := p.pitCsNodeMap[name.At(depth).String()]; present {
+		// present -> starting point for upwards search
+		for _, node := range nodeArr {
+			if node.depth-1 == depth && name.At(depth).Equals(node.component) {
+				// need to check parents in upwards search
+				nodeToCheck := node.parent
+				depthToCheck := depth - 1
+				for nodeToCheck.component != nil && name.At(depthToCheck).Equals(nodeToCheck.component) {
+					nodeToCheck = nodeToCheck.parent
+					depthToCheck--
+				}
+				if nodeToCheck.component == nil {
+					// Matched up to root node -> prefix found
+					return node
+				}
 			}
 		}
-	} else if name.Size() == p.depth {
-		return p
 	}
 	return nil
 }
 
-func (p *PitCsNode) findLongestPrefixEntry(name *ndn.Name) *PitCsNode {
-	if name.Size() > p.depth {
-		for _, child := range p.children {
-			if name.At(child.depth - 1).Equals(child.component) {
-				return child.findLongestPrefixEntry(name)
-			}
-		}
-	}
-	return p
+func (p *PitCs) findExactMatchEntry(name *ndn.Name) *PitCsNode {
+	// Exact match -> need to match all components
+	return p.findEntryAtDepth(name, name.Size()-1)
 }
 
-func (p *PitCsNode) fillTreeToPrefix(name *ndn.Name) *PitCsNode {
+func (p *PitCs) findLongestPrefixEntry(name *ndn.Name) *PitCsNode {
+	// A bottom up search to try to match the longest prefix possible
+	for depth := name.Size() - 1; depth >= 0; depth-- {
+		if node := p.findEntryAtDepth(name, depth); node != nil {
+			return node
+		}
+	}
+	return p.root // No match found -> longest prefix is root ("/")
+}
+
+func (p *PitCs) fillTreeToPrefix(name *ndn.Name) *PitCsNode {
 	curNode := p.findLongestPrefixEntry(name)
+
 	for depth := curNode.depth + 1; depth <= name.Size(); depth++ {
 		newNode := new(PitCsNode)
 		newNode.component = name.At(depth - 1).DeepCopy()
 		newNode.depth = depth
 		newNode.parent = curNode
+
+		if _, present := p.pitCsNodeMap[newNode.component.String()]; !present {
+			p.pitCsNodeMap[newNode.component.String()] = make([]*PitCsNode, 0)
+		}
+		p.pitCsNodeMap[newNode.component.String()] = append(p.pitCsNodeMap[newNode.component.String()], newNode)
+
 		curNode.children = append(curNode.children, newNode)
 		curNode = newNode
 	}
@@ -196,11 +222,14 @@ func (p *PitCs) IsCsServing() bool {
 
 // FindOrInsertPIT inserts an entry in the PIT upon receipt of an Interest. Returns tuple of PIT entry and whether the Nonce is a duplicate.
 func (p *PitCs) FindOrInsertPIT(interest *ndn.Interest, hint *ndn.Delegation, inFace uint64) (*PitEntry, bool) {
-	node := p.root.fillTreeToPrefix(interest.Name())
+	node := p.fillTreeToPrefix(interest.Name())
 
 	var entry *PitEntry
 	for _, curEntry := range node.pitEntries {
-		if curEntry.CanBePrefix == interest.CanBePrefix() && curEntry.MustBeFresh == interest.MustBeFresh() && ((hint == nil && curEntry.ForwardingHint == nil) || hint.Name().Equals(curEntry.ForwardingHint.Name())) {
+		if curEntry.CanBePrefix == interest.CanBePrefix() &&
+			curEntry.MustBeFresh == interest.MustBeFresh() &&
+			((hint == nil && curEntry.ForwardingHint == nil) ||
+				hint.Name().Equals(curEntry.ForwardingHint.Name())) {
 			entry = curEntry
 			break
 		}
@@ -239,6 +268,8 @@ func (p *PitCs) FindOrInsertPIT(interest *ndn.Interest, hint *ndn.Delegation, in
 // FindPITFromData finds the PIT entries matching a Data packet. Note that this does not consider the effect of MustBeFresh.
 func (p *PitCs) FindPITFromData(data *ndn.Data, token *uint32) []*PitEntry {
 	if token != nil {
+		// TODO: token tends to be nil when doing perf tests with ndncatchunks and ndnputchunks
+		// Figure out why
 		if entry, ok := p.pitTokenMap[*token]; ok && entry.Token == *token {
 			return []*PitEntry{entry}
 		}
@@ -246,10 +277,9 @@ func (p *PitCs) FindPITFromData(data *ndn.Data, token *uint32) []*PitEntry {
 	}
 
 	matching := make([]*PitEntry, 0)
-	dataNameLen := data.Name().Size()
-	for curNode := p.root.findLongestPrefixEntry(data.Name()); curNode != nil; curNode = curNode.parent {
+	for curNode := p.findLongestPrefixEntry(data.Name()); curNode != nil; curNode = curNode.parent {
 		for _, entry := range curNode.pitEntries {
-			if entry.CanBePrefix || curNode.depth == dataNameLen {
+			if entry.CanBePrefix || curNode.depth == data.Name().Size() {
 				matching = append(matching, entry)
 			}
 		}
@@ -277,7 +307,7 @@ func (p *PitCs) RemovePITEntry(pitEntry *PitEntry) bool {
 
 // FindMatchingDataCS finds the best matching entry in the CS (if any). If MustBeFresh is set to true in the Interest, only non-stale CS entries will be returned.
 func (p *PitCs) FindMatchingDataCS(interest *ndn.Interest) *CsEntry {
-	node := p.root.findExactMatchEntry(interest.Name())
+	node := p.findExactMatchEntry(interest.Name())
 	if node != nil {
 		if !interest.CanBePrefix() {
 			if node.csEntry != nil {
@@ -308,7 +338,7 @@ func (p *PitCs) InsertDataCS(data *ndn.Data) {
 	} else {
 		// New entry
 		p.nCsEntries++
-		node := p.root.fillTreeToPrefix(data.Name())
+		node := p.fillTreeToPrefix(data.Name())
 		node.csEntry = new(CsEntry)
 		node.csEntry.node = node
 		node.csEntry.index = index
