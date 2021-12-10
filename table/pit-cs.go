@@ -289,6 +289,7 @@ func (p *PitCs) FindPITFromData(data *ndn.Data, token *uint32) []*PitEntry {
 
 // RemovePITEntry removes the specified PIT entry.
 func (p *PitCs) RemovePITEntry(pitEntry *PitEntry) bool {
+	// TODO: might need to update pitCsNodeMap if we end up pruning a node
 	for i, entry := range pitEntry.node.pitEntries {
 		if entry == pitEntry {
 			if i < len(pitEntry.node.pitEntries)-1 {
@@ -365,6 +366,7 @@ func (p *PitCsNode) findMatchingDataCSPrefix(interest *ndn.Interest) *CsEntry {
 		return p.csEntry
 	}
 
+	// TODO: this can also probably be optimized with a hash table approach
 	if p.depth < interest.Name().Size() {
 		for _, child := range p.children {
 			if interest.Name().At(p.depth).Equals(child.component) {
