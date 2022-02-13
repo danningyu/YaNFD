@@ -27,7 +27,7 @@ type DeadNonceList struct {
 func NewDeadNonceList() *DeadNonceList {
 	d := new(DeadNonceList)
 	d.list = make(map[uint64]byte)
-	d.ExpirationTimer = make(chan bool, tableQueueSize)
+	d.ExpirationTimer = make(chan bool, TableQueueSize)
 	return d
 }
 
