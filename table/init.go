@@ -15,7 +15,7 @@ import (
 )
 
 // tableQueueSize is the maxmimum size of queues in the tables.
-var TableQueueSize int // TODO: how can we unexport this variable?
+var tableQueueSize int // TODO: how can we unexport this variable?
 
 // deadNonceListLifetime is the lifetime of entries in the dead nonce list.
 var deadNonceListLifetime time.Duration
@@ -37,7 +37,7 @@ var producerRegions []string
 
 // Configure configures the forwarding system.
 func Configure() {
-	TableQueueSize = core.GetConfigIntDefault("tables.queue_size", 1024)
+	tableQueueSize = core.GetConfigIntDefault("tables.queue_size", 1024)
 
 	// Content Store
 	csCapacity = int(core.GetConfigUint16Default("tables.content_store.capacity", 1024))

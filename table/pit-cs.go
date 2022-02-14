@@ -13,7 +13,41 @@ import (
 	"github.com/named-data/YaNFD/ndn"
 )
 
-// PitEntry is an entry in a thread's PIT.
+// PitCsTable dictates what functionality a Pit-Cs table should implement
+type PitCsTable interface {
+	InsertInterest(interest *ndn.Interest, hint *ndn.Name, inFace uint64) (PitEntry, bool)
+	RemoveInterest(pitEntry PitEntry) bool
+	// RemoveInterestByName(name *ndn.Name)
+	FindInterestExactMatch(interest *ndn.Interest) PitEntry
+	// FindInterestExactMatchByName(name *ndn.Name) PitEntry
+	FindInterestPrefixMatch(interest *ndn.Interest, token uint32) []PitEntry
+	FindInterestPrefixMatchByData(data *ndn.Data, token *uint32) []PitEntry
+	// FindInterestPrefixMatchByName(me *ndn.Name) []PitEntry
+
+	PitSize() int
+
+	// InsertOutRecord(interest *ndn.Interest, face uint64) *PitOutRecord
+	// GetOutRecords(interest *ndn.Interest) []*PitOutRecord
+	// GetOutRecordsByName(name *ndn.Name) []*PitOutRecord
+
+	InsertData(data *ndn.Data)
+	FindDataExactMatch(interest *ndn.Interest) CsEntry
+	FindDataPrefixMatch(interest *ndn.Interest) CsEntry
+	CsSize() int
+	IsCsAdmitting() bool
+	IsCsServing() bool
+
+	eraseCsDataFromReplacementStrategy(index uint64)
+
+	ExpiringPitEntries() chan PitEntry
+}
+
+// BasePitCsTable contains properties common to all PIT-CS tables
+type BasePitCsTable struct {
+	expiringPitEntries chan PitEntry
+}
+
+// PitEntry dictates what entries in a PIT-CS table should implement
 type PitEntry interface {
 	PitCs() PitCsTable
 	Name() *ndn.Name // external users can access this
@@ -39,7 +73,8 @@ type PitEntry interface {
 	ClearInRecords()
 }
 
-type BasePitEntry struct {
+// basePitEntry contains PIT entry properties common to all tables.
+type basePitEntry struct {
 	// lowercase fields so that they aren't exported
 	name           *ndn.Name
 	canBePrefix    bool
@@ -53,84 +88,6 @@ type BasePitEntry struct {
 	satisfied      bool
 
 	token uint32
-}
-
-// FindOrInsertInRecord finds or inserts an InRecord for the face, updating the metadata and returning whether there was already an in-record in the entry.
-func (bpe *BasePitEntry) InsertInRecord(interest *ndn.Interest, face uint64, incomingPitToken []byte) (*PitInRecord, bool) {
-	var record *PitInRecord
-	var ok bool
-	if record, ok = bpe.inRecords[face]; !ok {
-		record := new(PitInRecord)
-		record.Face = face
-		record.LatestNonce = interest.Nonce()
-		record.LatestTimestamp = time.Now()
-		record.LatestInterest = interest
-		record.ExpirationTime = time.Now().Add(interest.Lifetime())
-		record.PitToken = incomingPitToken
-		bpe.inRecords[face] = record
-		return record, len(bpe.inRecords) > 1
-	}
-
-	// Existing record
-	record.LatestNonce = interest.Nonce()
-	record.LatestTimestamp = time.Now()
-	record.LatestInterest = interest
-	record.ExpirationTime = time.Now().Add(interest.Lifetime())
-	return record, true
-}
-
-// ClearInRecords removes all in-records from the PIT entry.
-func (e *BasePitEntry) ClearInRecords() {
-	e.inRecords = make(map[uint64]*PitInRecord)
-}
-
-// ClearOutRecords removes all out-records from the PIT entry.
-func (e *BasePitEntry) ClearOutRecords() {
-	e.outRecords = make(map[uint64]*PitOutRecord)
-}
-
-func (bpe *BasePitEntry) Name() *ndn.Name {
-	return bpe.name
-}
-
-func (bpe *BasePitEntry) CanBePrefix() bool {
-	return bpe.canBePrefix
-}
-
-func (bpe *BasePitEntry) MustBeFresh() bool {
-	return bpe.mustBeFresh
-}
-
-func (bpe *BasePitEntry) ForwardingHint() *ndn.Name {
-	return bpe.forwardingHint
-}
-
-func (bpe *BasePitEntry) InRecords() map[uint64]*PitInRecord {
-	return bpe.inRecords
-}
-
-func (bpe *BasePitEntry) OutRecords() map[uint64]*PitOutRecord {
-	return bpe.outRecords
-}
-
-func (bpe *BasePitEntry) ExpirationTime() time.Time {
-	return bpe.expirationTime
-}
-
-func (bpe *BasePitEntry) SetExpirationTime(t time.Time) {
-	bpe.expirationTime = t
-}
-
-func (bpe *BasePitEntry) Satisfied() bool {
-	return bpe.satisfied
-}
-
-func (bpe *BasePitEntry) SetSatisfied(isSatisfied bool) {
-	bpe.satisfied = isSatisfied
-}
-
-func (bpe *BasePitEntry) Token() uint32 {
-	return bpe.token
 }
 
 // PitInRecord records an incoming Interest on a given face.
@@ -159,56 +116,44 @@ type CsEntry interface {
 	Data() *ndn.Data
 }
 
-type BaseCsEntry struct {
+type baseCsEntry struct {
 	index     uint64
 	staleTime time.Time
 	data      *ndn.Data
 }
 
-func (bce *BaseCsEntry) Index() uint64 {
-	return bce.index
+// InsertInRecord finds or inserts an InRecord for the face, updating the metadata and returning whether there was already an in-record in the entry.
+func (bpe *basePitEntry) InsertInRecord(interest *ndn.Interest, face uint64, incomingPitToken []byte) (*PitInRecord, bool) {
+	var record *PitInRecord
+	var ok bool
+	if record, ok = bpe.inRecords[face]; !ok {
+		record := new(PitInRecord)
+		record.Face = face
+		record.LatestNonce = interest.Nonce()
+		record.LatestTimestamp = time.Now()
+		record.LatestInterest = interest
+		record.ExpirationTime = time.Now().Add(interest.Lifetime())
+		record.PitToken = incomingPitToken
+		bpe.inRecords[face] = record
+		return record, len(bpe.inRecords) > 1
+	}
+
+	// Existing record
+	record.LatestNonce = interest.Nonce()
+	record.LatestTimestamp = time.Now()
+	record.LatestInterest = interest
+	record.ExpirationTime = time.Now().Add(interest.Lifetime())
+	return record, true
 }
 
-func (bce *BaseCsEntry) StaleTime() time.Time {
-	return bce.staleTime
+// ClearInRecords removes all in-records from the PIT entry.
+func (bpe *basePitEntry) ClearInRecords() {
+	bpe.inRecords = make(map[uint64]*PitInRecord)
 }
 
-func (bce *BaseCsEntry) Data() *ndn.Data {
-	return bce.data
-}
-
-type PitCsTable interface {
-	InsertInterest(interest *ndn.Interest, hint *ndn.Name, inFace uint64) (PitEntry, bool)
-	RemoveInterest(pitEntry PitEntry) bool
-	// RemoveInterestByName(name *ndn.Name)
-	FindInterestExactMatch(interest *ndn.Interest) PitEntry
-	// FindInterestExactMatchByName(name *ndn.Name) *PitEntry
-	FindInterestPrefixMatch(interest *ndn.Interest, token uint32) []PitEntry
-	FindInterestPrefixMatchByData(data *ndn.Data, token *uint32) []PitEntry
-	// FindInterestPrefixMatchByName(me *ndn.Name) []*PitEntry
-
-	PitSize() int
-
-	// InsertOutRecord(interest *ndn.Interest, face uint64) *PitOutRecord
-	// GetOutRecords(interest *ndn.Interest) []*PitOutRecord
-	// GetOutRecordsByName(name *ndn.Name) []*PitOutRecord
-
-	InsertData(data *ndn.Data)
-	FindDataExactMatch(interest *ndn.Interest) CsEntry
-	FindDataPrefixMatch(interest *ndn.Interest) CsEntry
-	CsSize() int
-	IsCsAdmitting() bool
-	IsCsServing() bool
-
-	ExpiringPitEntries() chan PitEntry
-}
-
-type BasePitCsTable struct {
-	expiringPitEntries chan PitEntry
-}
-
-func (p *BasePitCsTable) ExpiringPitEntries() chan PitEntry {
-	return p.expiringPitEntries
+// ClearOutRecords removes all out-records from the PIT entry.
+func (bpe *basePitEntry) ClearOutRecords() {
+	bpe.outRecords = make(map[uint64]*PitOutRecord)
 }
 
 // SetExpirationTimerToNow updates the expiration timer to the current time.
@@ -244,4 +189,66 @@ func waitForPitExpiry(e PitEntry) {
 			e.PitCs().ExpiringPitEntries() <- e
 		}
 	}
+}
+
+///// Setters and Getters /////
+
+func (bpe *basePitEntry) Name() *ndn.Name {
+	return bpe.name
+}
+
+func (bpe *basePitEntry) CanBePrefix() bool {
+	return bpe.canBePrefix
+}
+
+func (bpe *basePitEntry) MustBeFresh() bool {
+	return bpe.mustBeFresh
+}
+
+func (bpe *basePitEntry) ForwardingHint() *ndn.Name {
+	return bpe.forwardingHint
+}
+
+func (bpe *basePitEntry) InRecords() map[uint64]*PitInRecord {
+	return bpe.inRecords
+}
+
+func (bpe *basePitEntry) OutRecords() map[uint64]*PitOutRecord {
+	return bpe.outRecords
+}
+
+func (bpe *basePitEntry) ExpirationTime() time.Time {
+	return bpe.expirationTime
+}
+
+func (bpe *basePitEntry) SetExpirationTime(t time.Time) {
+	bpe.expirationTime = t
+}
+
+func (bpe *basePitEntry) Satisfied() bool {
+	return bpe.satisfied
+}
+
+func (bpe *basePitEntry) SetSatisfied(isSatisfied bool) {
+	bpe.satisfied = isSatisfied
+}
+
+func (bpe *basePitEntry) Token() uint32 {
+	return bpe.token
+}
+
+func (bce *baseCsEntry) Index() uint64 {
+	return bce.index
+}
+
+func (bce *baseCsEntry) StaleTime() time.Time {
+	return bce.staleTime
+}
+
+func (bce *baseCsEntry) Data() *ndn.Data {
+	return bce.data
+}
+
+func (p *BasePitCsTable) ExpiringPitEntries() chan PitEntry {
+	return p.expiringPitEntries
 }
