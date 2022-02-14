@@ -10,6 +10,5 @@ require (
 	github.com/gorilla/websocket v1.4.2
 	github.com/pelletier/go-toml v1.9.4
 	github.com/stretchr/testify v1.7.0
-	golang.org/x/sys v0.0.0-20211019181941-9d821ace8654
-	golang.org/x/tools v0.1.9 // indirect
+	golang.org/x/sys v0.0.0-20211001092434-39dca1131b70
 )
