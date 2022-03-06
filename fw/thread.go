@@ -241,15 +241,11 @@ func (t *Thread) processIncomingInterest(pendingPacket *ndn.PendingPacket) {
 
 		// Check CS for matching entry
 		if t.pitCS.IsCsServing() {
-			csEntry := t.pitCS.FindDataExactMatch(interest)
+			csEntry := t.pitCS.FindMatchingDataFromCS(interest)
 			if csEntry != nil {
-				csEntry = t.pitCS.FindDataPrefixMatch(interest)
-				if csEntry != nil {
-					// Pass to strategy AfterContentStoreHit pipeline
-					strategy.AfterContentStoreHit(pitEntry, incomingFace.FaceID(), csEntry.Data())
-					return
-				}
-
+				// Pass to strategy AfterContentStoreHit pipeline
+				strategy.AfterContentStoreHit(pitEntry, incomingFace.FaceID(), csEntry.Data())
+				return
 			}
 		}
 	} else {

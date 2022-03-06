@@ -62,7 +62,7 @@ func (l *CsLRU) BeforeUse(index uint64, data *ndn.Data) {
 func (l *CsLRU) EvictEntries() {
 	for l.queue.Len() > csCapacity {
 		indexToErase := l.queue.Front().Value.(uint64)
-		l.cs.eraseCsDataFromReplacementStrategy(indexToErase) // TODO: fix this line with public method
+		l.cs.eraseCsDataFromReplacementStrategy(indexToErase) // TODO: find better name for this method
 		l.queue.Remove(l.queue.Front())
 	}
 }

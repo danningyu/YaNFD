@@ -17,7 +17,6 @@ import (
 type PitCsTable interface {
 	InsertInterest(interest *ndn.Interest, hint *ndn.Name, inFace uint64) (PitEntry, bool)
 	RemoveInterest(pitEntry PitEntry) bool
-	// RemoveInterestByName(name *ndn.Name)
 	FindInterestExactMatch(interest *ndn.Interest) PitEntry
 	// FindInterestExactMatchByName(name *ndn.Name) PitEntry
 	FindInterestPrefixMatch(interest *ndn.Interest, token uint32) []PitEntry
@@ -31,8 +30,7 @@ type PitCsTable interface {
 	// GetOutRecordsByName(name *ndn.Name) []*PitOutRecord
 
 	InsertData(data *ndn.Data)
-	FindDataExactMatch(interest *ndn.Interest) CsEntry
-	FindDataPrefixMatch(interest *ndn.Interest) CsEntry
+	FindMatchingDataFromCS(interest *ndn.Interest) CsEntry
 	CsSize() int
 	IsCsAdmitting() bool
 	IsCsServing() bool
@@ -42,8 +40,8 @@ type PitCsTable interface {
 	ExpiringPitEntries() chan PitEntry
 }
 
-// BasePitCsTable contains properties common to all PIT-CS tables
-type BasePitCsTable struct {
+// basePitCsTable contains properties common to all PIT-CS tables
+type basePitCsTable struct {
 	expiringPitEntries chan PitEntry
 }
 
@@ -159,6 +157,8 @@ func (bpe *basePitEntry) ClearOutRecords() {
 // SetExpirationTimerToNow updates the expiration timer to the current time.
 func SetExpirationTimerToNow(e PitEntry) {
 	e.SetExpirationTime(time.Now())
+	// ExpiringPitEntries() accesses a channel that is part of a particular Pit-CS table.
+	//  Send itself to this channel so that the Pit-CS table knows it is about to expire.
 	e.PitCs().ExpiringPitEntries() <- e
 }
 
@@ -249,6 +249,6 @@ func (bce *baseCsEntry) Data() *ndn.Data {
 	return bce.data
 }
 
-func (p *BasePitCsTable) ExpiringPitEntries() chan PitEntry {
+func (p *basePitCsTable) ExpiringPitEntries() chan PitEntry {
 	return p.expiringPitEntries
 }

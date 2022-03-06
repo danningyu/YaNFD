@@ -15,7 +15,7 @@ import (
 )
 
 // tableQueueSize is the maxmimum size of queues in the tables.
-var tableQueueSize int // TODO: how can we unexport this variable?
+var tableQueueSize int
 
 // deadNonceListLifetime is the lifetime of entries in the dead nonce list.
 var deadNonceListLifetime time.Duration

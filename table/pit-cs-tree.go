@@ -12,7 +12,7 @@ import (
 
 // PitCsTree represents a PIT-CS implementation that uses a name tree
 type PitCsTree struct {
-	BasePitCsTable
+	basePitCsTable
 
 	root *pitCsTreeNode
 
@@ -60,7 +60,7 @@ func NewPitCS() *PitCsTree {
 	// This value has already been validated from loading the configuration, so we know it will be one of the following (or else fatal)
 	switch csReplacementPolicy {
 	case "lru":
-		pitCs.csReplacement = NewCsLRU(pitCs) // TODO: this will be fixed once implementation is done
+		pitCs.csReplacement = NewCsLRU(pitCs)
 	default:
 		core.LogFatal(pitCs, "Unknown CS replacement policy ", csReplacementPolicy)
 	}
@@ -119,7 +119,7 @@ func (p *PitCsTree) InsertInterest(interest *ndn.Interest, hint *ndn.Name, inFac
 // RemovePITEntry removes the specified PIT entry.
 // Originally implemented as RemovePITEntry()
 func (p *PitCsTree) RemoveInterest(pitEntry PitEntry) bool {
-	e := pitEntry.(*nameTreePitEntry)
+	e := pitEntry.(*nameTreePitEntry) // No error check needed because PitCsTree always uses nameTreePitEntry
 	for i, entry := range e.node.pitEntries {
 		if entry == pitEntry {
 			if i < len(e.node.pitEntries)-1 {
@@ -149,16 +149,7 @@ func (p *PitCsTree) FindInterestExactMatch(interest *ndn.Interest) PitEntry {
 
 // Logic taken from FindPITFromData
 func (p *PitCsTree) FindInterestPrefixMatch(interest *ndn.Interest, token uint32) []PitEntry {
-	matching := make([]PitEntry, 0)
-	dataNameLen := interest.Name().Size()
-	for curNode := p.root.findLongestPrefixEntry(interest.Name()); curNode != nil; curNode = curNode.parent {
-		for _, entry := range curNode.pitEntries {
-			if entry.canBePrefix || curNode.depth == dataNameLen {
-				matching = append(matching, entry)
-			}
-		}
-	}
-	return matching
+	return p.findInterestPrefixMatchByName(interest.Name())
 }
 
 func (p *PitCsTree) FindInterestPrefixMatchByData(data *ndn.Data, token *uint32) []PitEntry {
@@ -169,11 +160,15 @@ func (p *PitCsTree) FindInterestPrefixMatchByData(data *ndn.Data, token *uint32)
 		return nil
 	}
 
+	return p.findInterestPrefixMatchByName(data.Name())
+}
+
+func (p *PitCsTree) findInterestPrefixMatchByName(name *ndn.Name) []PitEntry {
 	matching := make([]PitEntry, 0)
-	dataNameLen := data.Name().Size()
-	for curNode := p.root.findLongestPrefixEntry(data.Name()); curNode != nil; curNode = curNode.parent {
+	dataNameLen := name.Size()
+	for curNode := p.root.findLongestPrefixEntry(name); curNode != nil; curNode = curNode.parent {
 		for _, entry := range curNode.pitEntries {
-			if entry.CanBePrefix() || curNode.depth == dataNameLen {
+			if entry.canBePrefix || curNode.depth == dataNameLen {
 				matching = append(matching, entry)
 			}
 		}
@@ -298,9 +293,8 @@ func (p *PitCsTree) hashCsName(name *ndn.Name) uint64 {
 	return xxhash.Sum64String(name.String())
 }
 
-// FindDataExactMatch finds an exact matching entry in the CS (if any). If MustBeFresh is set to true in the Interest, only non-stale CS entries will be returned.
-// Originally implemented as FindMatchingDataCS()
-func (p *PitCsTree) FindDataExactMatch(interest *ndn.Interest) CsEntry {
+// FindMatchingDataCS finds the best matching entry in the CS (if any). If MustBeFresh is set to true in the Interest, only non-stale CS entries will be returned.
+func (p *PitCsTree) FindMatchingDataFromCS(interest *ndn.Interest) CsEntry {
 	node := p.root.findExactMatchEntry(interest.Name())
 	if node != nil {
 		if !interest.CanBePrefix() {
@@ -309,16 +303,7 @@ func (p *PitCsTree) FindDataExactMatch(interest *ndn.Interest) CsEntry {
 			}
 			return node.csEntry
 		}
-		return node.findMatchingDataCSPrefix(interest) // TODO: is this a bug?
-		// Shouldn't we call this if node == nil, not if node != nil?
-	}
-	return nil
-}
-
-// Originally implemented as FindMatchingDataCS()
-func (p *PitCsTree) FindDataPrefixMatch(interest *ndn.Interest) CsEntry {
-	if interest.CanBePrefix() {
-		return p.root.findMatchingDataCSPrefix(interest)
+		return node.findMatchingDataCSPrefix(interest)
 	}
 	return nil
 }
