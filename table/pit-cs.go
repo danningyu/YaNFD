@@ -249,6 +249,7 @@ func (bce *baseCsEntry) Data() *ndn.Data {
 	return bce.data
 }
 
+// ExpiringPitEntries is a channel to which PIT entries that are about to expire are sent and received.
 func (p *basePitCsTable) ExpiringPitEntries() chan PitEntry {
 	return p.expiringPitEntries
 }
