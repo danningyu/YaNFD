@@ -80,7 +80,7 @@ func (p *PitCsTree) InsertInterest(interest *ndn.Interest, hint *ndn.Name, inFac
 
 	var entry *nameTreePitEntry
 	for _, curEntry := range node.pitEntries {
-		if curEntry.CanBePrefix() == interest.CanBePrefix() && curEntry.MustBeFresh() == interest.MustBeFresh() && ((hint == nil && curEntry.ForwardingHint == nil) || hint.Equals(curEntry.ForwardingHint())) {
+		if curEntry.CanBePrefix() == interest.CanBePrefix() && curEntry.MustBeFresh() == interest.MustBeFresh() && ((hint == nil && curEntry.ForwardingHint() == nil) || hint.Equals(curEntry.ForwardingHint())) {
 			entry = curEntry
 			break
 		}
@@ -300,8 +300,11 @@ func (p *PitCsTree) FindMatchingDataFromCS(interest *ndn.Interest) CsEntry {
 		if !interest.CanBePrefix() {
 			if node.csEntry != nil {
 				p.csReplacement.BeforeUse(node.csEntry.index, node.csEntry.data)
+				return node.csEntry
 			}
-			return node.csEntry
+			// Return nil instead of node.csEntry so that
+			// the return type is nil rather than CSEntry{nil}
+			return nil
 		}
 		return node.findMatchingDataCSPrefix(interest)
 	}
