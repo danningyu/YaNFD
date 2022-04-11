@@ -164,7 +164,6 @@ func TestClearNextHops(t *testing.T) {
 
 	nextHops = FibStrategyTable.FindNextHops(name)
 	assert.Equal(t, 1, len(nextHops))
-
 	FibStrategyTable.ClearNextHops(name)
 	nextHops = FibStrategyTable.FindNextHops(name)
 	assert.Equal(t, 0, len(nextHops))
@@ -221,20 +220,19 @@ func TestGetAllFIBEntries(t *testing.T) {
 	bestRoute, _ := ndn.NameFromString("/localhost/nfd/strategy/best-route/v=1")
 	multicast, _ := ndn.NameFromString("/localhost/nfd/strategy/multicast/v=1")
 
+	hopId2 := uint64(200)
+	hopId3 := uint64(300)
+
 	// Only strategy, no next hops, so it shouldn't be returned
 	name, _ := ndn.NameFromString("/test")
 	FibStrategyTable.SetStrategy(name, multicast)
 
 	name2, _ := ndn.NameFromString("/test/name/202=abc123")
 	FibStrategyTable.SetStrategy(name2, bestRoute)
-
-	// hopId1 := uint64(100)
-	hopId2 := uint64(200)
-	hopId3 := uint64(300)
-
 	FibStrategyTable.InsertNextHop(name2, hopId2, 20)
 	FibStrategyTable.InsertNextHop(name2, hopId3, 30)
 
+	// name3 has no strategy
 	name3, _ := ndn.NameFromString("/test/name_second/202=abc123")
 	FibStrategyTable.InsertNextHop(name3, hopId3, 40)
 	FibStrategyTable.InsertNextHop(name3, hopId3, 50)

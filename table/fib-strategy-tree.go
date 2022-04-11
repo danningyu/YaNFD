@@ -148,7 +148,6 @@ func (f *FibStrategyTree) InsertNextHop(name *ndn.Name, nexthop uint64, cost uin
 	f.fibStrategyRWMutex.Lock()
 	entry := f.fillTreeToPrefix(name)
 	if entry.name == nil {
-		core.LogInfo("fib-strategy-tree", "Adding name ", name.String())
 		entry.name = name
 	}
 	for _, existingNexthop := range entry.nexthops {
@@ -228,7 +227,6 @@ func (f *FibStrategyTree) SetStrategy(name *ndn.Name, strategy *ndn.Name) {
 	f.fibStrategyRWMutex.Lock()
 	entry := f.fillTreeToPrefix(name)
 	if entry.name == nil {
-		core.LogInfo("fib-strategy-tree", "Adding name ", name.String())
 		entry.name = name
 	}
 	entry.strategy = strategy
