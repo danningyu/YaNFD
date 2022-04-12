@@ -63,7 +63,7 @@ func (f *fibStrategyTreeEntry) findExactMatchEntry(name *ndn.Name) *fibStrategyT
 	return nil
 }
 
-// findExactMatchEntry returns the entry corresponding to the longest
+// findLongestPrefixEntry returns the entry corresponding to the longest
 // prefix match of the given name. It returns nil if no exact match was found.
 func (f *fibStrategyTreeEntry) findLongestPrefixEntry(name *ndn.Name) *fibStrategyTreeEntry {
 	if name.Size() > f.depth {

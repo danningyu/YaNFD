@@ -73,7 +73,7 @@ func (e *nameTreePitEntry) PitCs() PitCsTable {
 	return e.pitCsTable
 }
 
-// FindOrInsertPIT inserts an entry in the PIT upon receipt of an Interest.
+// InsertInterest inserts an entry in the PIT upon receipt of an Interest.
 // Returns tuple of PIT entry and whether the Nonce is a duplicate.
 func (p *PitCsTree) InsertInterest(interest *ndn.Interest, hint *ndn.Name, inFace uint64) (PitEntry, bool) {
 	node := p.root.fillTreeToPrefix(interest.Name())

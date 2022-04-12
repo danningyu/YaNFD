@@ -18,8 +18,8 @@ type FibStrategyEntry interface {
 	GetNextHops() []*FibNextHopEntry
 }
 
-// baseFibStrategyEntry represents an implementation of FibStrategyEntry
-// that all other entry types should include.
+// baseFibStrategyEntry represents information that all
+// FibStrategyEntry implementations should include.
 type baseFibStrategyEntry struct {
 	component ndn.NameComponent
 	name      *ndn.Name
