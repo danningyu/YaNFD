@@ -131,6 +131,10 @@ func (y *YaNFD) Start() {
 	}
 	dispatch.InitializeFWThreads(fwForDispatch)
 
+	// Initialize FIB table
+	fibTableAlgorithm := core.GetConfigStringDefault("tables.fib.algorithm", "nametree")
+	table.CreateFIBTable(fibTableAlgorithm)
+
 	// Perform setup operations for each network interface
 	faceCnt := 0
 	ifaces, err := net.Interfaces()
