@@ -138,7 +138,7 @@
     # Selects the algorithm used to implement the FIB
     # Allowed options: nametree, hashtable
     # Default: nametree
-    algorithm = nametree
+    algorithm = "nametree"
 
     [tables.fib.hashtable]
     # Specifies the virtual node depth. Must be a positive number.
