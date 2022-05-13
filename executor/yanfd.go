@@ -108,6 +108,10 @@ func (y *YaNFD) Start() {
 	//core.LogInfo("Main", "Loading strategies")
 	//fw.LoadStrategies()
 
+	// Initialize FIB table
+	fibTableAlgorithm := core.GetConfigStringDefault("tables.fib.algorithm", "nametree")
+	table.CreateFIBTable(fibTableAlgorithm)
+
 	// Create null face
 	nullFace := face.MakeNullLinkService(face.MakeNullTransport())
 	face.FaceTable.Add(nullFace)
@@ -130,10 +134,6 @@ func (y *YaNFD) Start() {
 		go fw.Threads[i].Run()
 	}
 	dispatch.InitializeFWThreads(fwForDispatch)
-
-	// Initialize FIB table
-	fibTableAlgorithm := core.GetConfigStringDefault("tables.fib.algorithm", "nametree")
-	table.CreateFIBTable(fibTableAlgorithm)
 
 	// Perform setup operations for each network interface
 	faceCnt := 0

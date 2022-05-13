@@ -84,8 +84,10 @@ func CreateFIBTable(fibTableAlgorithm string) {
 	case "hashtable":
 		m := core.GetConfigUint16Default("tables.fib.hashtable.m", 5)
 		newFibStrategyTableHashTable(m)
+	case "nametree":
+		newFibStrategyTableTree()
 	default:
 		// Default to nametree
-		newFibStrategyTableTree()
+		core.LogFatal("CreateFIBTable", "Unrecognized FIB table algorithm specified: ", fibTableAlgorithm)
 	}
 }

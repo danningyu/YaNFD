@@ -16,25 +16,9 @@ package table
 import (
 	"sync"
 
-	"github.com/cespare/xxhash"
 	"github.com/named-data/YaNFD/ndn"
+	"github.com/named-data/YaNFD/utils/comparison"
 )
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-
-	return b
-}
 
 type virtualDetails struct {
 	// isVirtual marks whether this a virtual node, as defined in the paper.
@@ -50,22 +34,20 @@ type virtualDetails struct {
 type FibStrategyHashTable struct {
 	// m is the name length for virtual nodes, as defined in the paper
 	// Must be a positive value
-	// TODO: Allow for the value of m to be changed after the FIB is created.
-	//       This would require deleting and recreating virtual nodes.
 	m int
 
 	// realTable is a map of names (hashed as uint64 values) to the FIB entry
 	// associated with that name.
-	realTable map[uint64]*baseFibStrategyEntry
+	realTable map[string]*baseFibStrategyEntry
 
 	// virtTable is a map of virtual names (hashed as uint64 values) to the
 	// virtualDetails struct associated with that virtual name.
-	virtTable map[uint64]*virtualDetails
+	virtTable map[string]*virtualDetails
 
 	// virtTableNames is a map of virtual names (hashed as uint64 values) to
 	// a set of all the real names associated with that virtual name. The
 	// inner map is being used as a set; the bool value type does not matter.
-	virtTableNames map[uint64](map[string]bool)
+	virtTableNames map[string](map[string]struct{})
 
 	// fibStrategyRWMutex is a mutex used to synchronize accesses to the FIB,
 	// which is shared across all the forwarding threads.
@@ -79,18 +61,17 @@ func newFibStrategyTableHashTable(m uint16) {
 	fibStrategyTableHashTable := FibStrategyTable.(*FibStrategyHashTable)
 
 	fibStrategyTableHashTable.m = int(m) // Cast to int so that it's easy to pass to name.Prefix
-	fibStrategyTableHashTable.realTable = make(map[uint64]*baseFibStrategyEntry)
-	fibStrategyTableHashTable.virtTable = make(map[uint64]*virtualDetails)
-	fibStrategyTableHashTable.virtTableNames = make(map[uint64]map[string]bool)
+	fibStrategyTableHashTable.realTable = make(map[string]*baseFibStrategyEntry)
+	fibStrategyTableHashTable.virtTable = make(map[string]*virtualDetails)
+	fibStrategyTableHashTable.virtTableNames = make(map[string]map[string]struct{})
 
 	rootName, _ := ndn.NameFromString(("/"))
 	defaultStrategy, _ := ndn.NameFromString("/localhost/nfd/strategy/best-route/v=1")
 
-	rootNameHash := xxhash.Sum64String(rootName.String())
 	rtEntry := new(baseFibStrategyEntry)
 	rtEntry.name = rootName
 	rtEntry.strategy = defaultStrategy
-	fibStrategyTableHashTable.realTable[rootNameHash] = rtEntry
+	fibStrategyTableHashTable.realTable[rootName.String()] = rtEntry
 }
 
 // findLongestPrefixEntry returns the entry corresponding to the longest
@@ -99,8 +80,7 @@ func (f *FibStrategyHashTable) findLongestPrefixMatch(name *ndn.Name) *baseFibSt
 	if name.Size() <= f.m {
 		// Name length is less than or equal to M, so only need to check real table
 		for pfx := name.Size(); pfx >= 0; pfx-- {
-			namePrefixHash := xxhash.Sum64String(name.Prefix(pfx).String())
-			if val, ok := f.realTable[namePrefixHash]; ok {
+			if val, ok := f.realTable[name.Prefix(pfx).String()]; ok {
 				return val
 			}
 		}
@@ -109,14 +89,12 @@ func (f *FibStrategyHashTable) findLongestPrefixMatch(name *ndn.Name) *baseFibSt
 
 	// Name is longer than M, so use virtual node to lookup first
 	virtName := name.Prefix(f.m)
-	virtNameHash := xxhash.Sum64String(virtName.String())
-	_, ok := f.virtTable[virtNameHash]
+	_, ok := f.virtTable[virtName.String()]
 	if ok {
 		// Virtual name present, look for longer matches
-		pfx := min(f.virtTable[virtNameHash].md, name.Size())
+		pfx := comparison.Min(f.virtTable[virtName.String()].md, name.Size())
 		for ; pfx > f.m; pfx-- {
-			namePrefixHash := xxhash.Sum64String(name.Prefix(pfx).String())
-			if val, ok := f.realTable[namePrefixHash]; ok {
+			if val, ok := f.realTable[name.Prefix(pfx).String()]; ok {
 				return val
 			}
 		}
@@ -127,8 +105,7 @@ func (f *FibStrategyHashTable) findLongestPrefixMatch(name *ndn.Name) *baseFibSt
 	// For example: Table has prefixes /a and /a/b/c, virtual entry is /a/b
 	// A search for /a/b/d will not match /a/b/c, so we need it to match /a
 	for pfx := f.m; pfx >= 0; pfx-- {
-		namePrefixHash := xxhash.Sum64String(name.Prefix(pfx).String())
-		if val, ok := f.realTable[namePrefixHash]; ok {
+		if val, ok := f.realTable[name.Prefix(pfx).String()]; ok {
 			return val
 		}
 	}
@@ -141,52 +118,52 @@ func (f *FibStrategyHashTable) findLongestPrefixMatch(name *ndn.Name) *baseFibSt
 // virtTable, and virtTableNames. It does not set the nexthops or strategy
 // fields of the newly created entry. The caller is responsible for doing that.
 func (f *FibStrategyHashTable) insertEntry(name *ndn.Name) *baseFibStrategyEntry {
-	nameHash := xxhash.Sum64String(name.String())
+	nameString := name.String()
 
-	if _, ok := f.realTable[nameHash]; !ok {
+	if _, ok := f.realTable[nameString]; !ok {
 		rtEntry := new(baseFibStrategyEntry)
 		rtEntry.name = name
-		f.realTable[nameHash] = rtEntry
+		f.realTable[nameString] = rtEntry
 	}
 
 	// Insert into virtual table if name size >= M
 	if name.Size() == f.m {
-		if _, ok := f.virtTable[nameHash]; !ok {
+		if _, ok := f.virtTable[nameString]; !ok {
 			vtEntry := new(virtualDetails)
 			vtEntry.isVirtual = false
 			vtEntry.md = name.Size()
-			f.virtTable[nameHash] = vtEntry
+			f.virtTable[nameString] = vtEntry
 		}
 
-		if _, ok := f.virtTableNames[nameHash]; !ok {
-			f.virtTableNames[nameHash] = make(map[string]bool)
+		if _, ok := f.virtTableNames[nameString]; !ok {
+			f.virtTableNames[nameString] = make(map[string]struct{})
 		}
 
-		f.virtTable[nameHash].md = max(f.virtTable[nameHash].md, name.Size())
+		f.virtTable[nameString].md = comparison.Max(f.virtTable[nameString].md, name.Size())
 
 		// Insert into set of names
-		f.virtTableNames[nameHash][name.String()] = true
+		f.virtTableNames[nameString][nameString] = struct{}{}
 
 	} else if name.Size() > f.m {
-		virtNameHash := xxhash.Sum64String(name.Prefix(f.m).String())
-		if _, ok := f.virtTable[virtNameHash]; !ok {
+		virtNameString := name.Prefix(f.m).String()
+		if _, ok := f.virtTable[virtNameString]; !ok {
 			vtEntry := new(virtualDetails)
 			vtEntry.isVirtual = true
 			vtEntry.md = name.Size()
-			f.virtTable[virtNameHash] = vtEntry
+			f.virtTable[virtNameString] = vtEntry
 		}
 
-		if _, ok := f.virtTableNames[virtNameHash]; !ok {
-			f.virtTableNames[virtNameHash] = make(map[string]bool)
+		if _, ok := f.virtTableNames[virtNameString]; !ok {
+			f.virtTableNames[virtNameString] = make(map[string]struct{})
 		}
 
-		f.virtTable[virtNameHash].md = max(f.virtTable[virtNameHash].md, name.Size())
+		f.virtTable[virtNameString].md = comparison.Max(f.virtTable[virtNameString].md, name.Size())
 
 		// Insert into set of names
-		f.virtTableNames[virtNameHash][name.String()] = true
+		f.virtTableNames[virtNameString][nameString] = struct{}{}
 	}
 
-	return f.realTable[nameHash]
+	return f.realTable[nameString]
 }
 
 // pruneTables takes in an entry and removes it from the real table if it has no
@@ -198,7 +175,7 @@ func (f *FibStrategyHashTable) pruneTables(entry *baseFibStrategyEntry) {
 
 	// Delete the real entry
 	if len(entry.nexthops) == 0 && entry.strategy == nil {
-		delete(f.realTable, xxhash.Sum64String(entry.name.String()))
+		delete(f.realTable, entry.name.String())
 		pruned = true
 	}
 
@@ -208,11 +185,10 @@ func (f *FibStrategyHashTable) pruneTables(entry *baseFibStrategyEntry) {
 
 	// Delete the virtual entry too, if needed
 	if name.Size() >= f.m {
-		virtNameHash := xxhash.Sum64String(name.Prefix(f.m).String())
-		var inVirtTable bool
-		virtEntry, inVirtTable := f.virtTable[virtNameHash]
-		virtTableNamesEntry, inVirtNameTable := f.virtTableNames[virtNameHash]
-		var namePresentForVirtName bool
+		virtNameString := name.Prefix(f.m).String()
+		virtEntry, inVirtTable := f.virtTable[virtNameString]
+		virtTableNamesEntry, inVirtNameTable := f.virtTableNames[virtNameString]
+		namePresentForVirtName := false
 		if inVirtNameTable {
 			_, namePresentForVirtName = virtTableNamesEntry[name.String()]
 		}
@@ -225,7 +201,7 @@ func (f *FibStrategyHashTable) pruneTables(entry *baseFibStrategyEntry) {
 		if inVirtTable && namePresentForVirtName && pruned {
 			delete(virtTableNamesEntry, name.String())
 			if len(virtTableNamesEntry) == 0 {
-				delete(f.virtTableNames, virtNameHash)
+				delete(f.virtTableNames, virtNameString)
 			}
 		}
 
@@ -233,17 +209,17 @@ func (f *FibStrategyHashTable) pruneTables(entry *baseFibStrategyEntry) {
 		// AND the real name being deleted was the longest associated with the virtual name
 		// AND this real name was deleted from the real table
 		if inVirtTable && name.Size() == virtEntry.md && pruned {
-			_, inVirtNameTable = f.virtTableNames[virtNameHash]
+			_, inVirtNameTable = f.virtTableNames[virtNameString]
 			if !inVirtNameTable {
 				// Delete the entry entirely from the virtual table too
 				// if it was removed it from the virtual name table
-				delete(f.virtTable, virtNameHash)
+				delete(f.virtTable, virtNameString)
 			} else {
 				// Update with length of next longest real prefix associated
 				// with this virtual prefix
-				for k, _ := range f.virtTableNames[virtNameHash] {
+				for k, _ := range f.virtTableNames[virtNameString] {
 					n, _ := ndn.NameFromString(k)
-					virtEntry.md = max(virtEntry.md, n.Size())
+					virtEntry.md = comparison.Max(virtEntry.md, n.Size())
 				}
 			}
 		}
@@ -264,8 +240,7 @@ func (f *FibStrategyHashTable) FindNextHops(name *ndn.Name) []*FibNextHopEntry {
 	// Go backwards to find the first entry with nexthops
 	// since some might only have a strategy but no nexthops
 	for pfx := entry.name.Size(); pfx >= 0; pfx-- {
-		namePrefixHash := xxhash.Sum64String(entry.name.Prefix(pfx).String())
-		val, ok := f.realTable[namePrefixHash]
+		val, ok := f.realTable[entry.name.Prefix(pfx).String()]
 		if ok && len(val.nexthops) > 0 {
 			return val.nexthops
 		}
@@ -288,8 +263,7 @@ func (f *FibStrategyHashTable) FindStrategy(name *ndn.Name) *ndn.Name {
 	// Go backwards to find the first entry with strategy
 	// since some might only have a nexthops but no strategy
 	for pfx := entry.name.Size(); pfx >= 0; pfx-- {
-		namePrefixHash := xxhash.Sum64String(entry.name.Prefix(pfx).String())
-		val, ok := f.realTable[namePrefixHash]
+		val, ok := f.realTable[entry.name.Prefix(pfx).String()]
 		if ok && val.strategy != nil {
 			return val.strategy
 		}
@@ -326,8 +300,7 @@ func (f *FibStrategyHashTable) ClearNextHops(name *ndn.Name) {
 	f.fibStrategyRWMutex.Lock()
 	defer f.fibStrategyRWMutex.Unlock()
 
-	nameHash := xxhash.Sum64String(name.String())
-	entry, ok := f.realTable[nameHash]
+	entry, ok := f.realTable[name.String()]
 	if ok {
 		entry.nexthops = make([]*FibNextHopEntry, 0)
 		f.pruneTables(entry)
@@ -339,13 +312,12 @@ func (f *FibStrategyHashTable) RemoveNextHop(name *ndn.Name, nexthop uint64) {
 	f.fibStrategyRWMutex.Lock()
 	defer f.fibStrategyRWMutex.Unlock()
 
-	nameHash := xxhash.Sum64String(name.String())
-	if _, ok := f.realTable[nameHash]; !ok {
+	if _, ok := f.realTable[name.String()]; !ok {
 		return
 	}
 
 	// Remove matching nexthop from real table (if one exists)
-	realEntry := f.realTable[nameHash]
+	realEntry := f.realTable[name.String()]
 	nextHops := realEntry.nexthops
 	for i, nh := range nextHops {
 		if nh.Nexthop == nexthop {
@@ -387,8 +359,7 @@ func (f *FibStrategyHashTable) UnsetStrategy(name *ndn.Name) {
 	f.fibStrategyRWMutex.Lock()
 	defer f.fibStrategyRWMutex.Unlock()
 
-	nameHash := xxhash.Sum64String(name.String())
-	entry, ok := f.realTable[nameHash]
+	entry, ok := f.realTable[name.String()]
 	if ok {
 		entry.strategy = nil
 		f.pruneTables(entry)
