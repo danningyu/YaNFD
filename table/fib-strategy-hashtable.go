@@ -21,16 +21,11 @@ import (
 )
 
 type virtualDetails struct {
-	// isVirtual marks whether this a virtual node, as defined in the paper.
-	// If there exists a name with length greater than M, then the node is
-	// marked as virtual.
-	isVirtual bool
-
 	// md is the max depth associated with this virtual node, as defined in the paper.
 	md int
 }
 
-// FibStrategy Tree represents a tree implementation of the FIB-Strategy table.
+// FibStrategyHashTable represents a tree implementation of the FIB-Strategy table.
 type FibStrategyHashTable struct {
 	// m is the name length for virtual nodes, as defined in the paper
 	// Must be a positive value
@@ -74,7 +69,7 @@ func newFibStrategyTableHashTable(m uint16) {
 	fibStrategyTableHashTable.realTable[rootName.String()] = rtEntry
 }
 
-// findLongestPrefixEntry returns the entry corresponding to the longest
+// findLongestPrefixMatch returns the entry corresponding to the longest
 // prefix match of the given name. It returns nil if no exact match was found.
 func (f *FibStrategyHashTable) findLongestPrefixMatch(name *ndn.Name) *baseFibStrategyEntry {
 	if name.Size() <= f.m {
@@ -130,7 +125,6 @@ func (f *FibStrategyHashTable) insertEntry(name *ndn.Name) *baseFibStrategyEntry
 	if name.Size() == f.m {
 		if _, ok := f.virtTable[nameString]; !ok {
 			vtEntry := new(virtualDetails)
-			vtEntry.isVirtual = false
 			vtEntry.md = name.Size()
 			f.virtTable[nameString] = vtEntry
 		}
@@ -148,7 +142,6 @@ func (f *FibStrategyHashTable) insertEntry(name *ndn.Name) *baseFibStrategyEntry
 		virtNameString := name.Prefix(f.m).String()
 		if _, ok := f.virtTable[virtNameString]; !ok {
 			vtEntry := new(virtualDetails)
-			vtEntry.isVirtual = true
 			vtEntry.md = name.Size()
 			f.virtTable[virtNameString] = vtEntry
 		}
